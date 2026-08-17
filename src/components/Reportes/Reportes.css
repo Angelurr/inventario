@@ -112,6 +112,46 @@
   transform: translateY(0);
 }
 
+/* ===== TABS BAR ===== */
+.rep-tabs-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--rep-white);
+  border: 1px solid var(--rep-border);
+  border-radius: var(--rep-radius-md);
+  padding: 8px 12px;
+  box-shadow: var(--rep-shadow);
+}
+
+.rep-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border: none;
+  border-radius: var(--rep-radius-sm);
+  background: transparent;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--rep-text-muted);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+  white-space: nowrap;
+}
+
+.rep-tab-btn:hover {
+  color: var(--rep-primary);
+  background: var(--rep-primary-softer);
+}
+
+.rep-tab-btn.active {
+  background: var(--rep-primary);
+  color: var(--rep-white);
+  box-shadow: 0 4px 12px rgba(46, 92, 138, 0.28);
+}
+
 /* ===== LOADING ===== */
 .rep-loading-card {
   display: flex;
@@ -1214,5 +1254,19 @@
 
   .rep-calendar-grid-modern {
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  }
+
+  .rep-tabs-bar {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .rep-tab-btn {
+    padding: 8px 14px;
+    font-size: 0.78rem;
+  }
+
+  .rep-rankings-grid {
+    grid-template-columns: 1fr;
   }
 }
