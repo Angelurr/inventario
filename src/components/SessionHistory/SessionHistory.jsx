@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { collection, query, onSnapshot, orderBy, where, getDocs, doc, getDoc, limit } from "firebase/firestore";
 import { db } from "../../firebase/firebaseConfig";
 import { useAuth } from "../../context/AuthContext";
+import { getLocalDateString } from "../../utils/dateUtils";
 import "./SessionHistory.css";
 
 // Cache for user data lookups to avoid repeated Firestore reads
@@ -202,7 +203,7 @@ function SessionHistory() {
       doc.setFont("helvetica", "bold");
       doc.setFontSize(18);
       doc.setTextColor(46, 92, 138); // #2E5C8A
-      doc.text("SessionApp — Historial de Sesiones", 14, 20);
+      doc.text("AuroInventario — Historial de Sesiones", 14, 20);
       
       doc.setFont("helvetica", "normal");
       doc.setFontSize(10);
@@ -251,7 +252,7 @@ function SessionHistory() {
         }
       });
 
-      doc.save(`historial_sesiones_${new Date().toISOString().slice(0, 10)}.pdf`);
+      doc.save(`historial_sesiones_${getLocalDateString()}.pdf`);
     } catch (error) {
       console.error("Error al exportar PDF:", error);
       alert(error.message || "Hubo un error al generar el PDF.");

@@ -7,11 +7,15 @@ import {
   deleteProducto,
   checkCodigoExiste 
 } from "../../services/productosService";
+import { subscribeProveedores } from "../../services/proveedoresService";
+import { restoreCaret, getNewCaret } from "../../utils/caretUtils";
+import { getLocalDateString } from "../../utils/dateUtils";
 import "./Productos.css";
 
 function Productos({ currentUserDisplayName }) {
   const { user } = useAuth();
   const [productos, setProductos] = useState([]);
+  const [proveedores, setProveedores] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("lista"); // 'lista' | 'esquema'
   const [searchTerm, setSearchTerm] = useState("");
@@ -32,7 +36,10 @@ function Productos({ currentUserDisplayName }) {
     nombre: "",
     descripcion: "",
     precioCompra: "",
-    stock: "",
+    proveedorId: "",
+    proveedorNombre: "",
+    preciosProveedor: {},
+    imagen: "",
     estado: "Activo"
   };
   const [formData, setFormData] = useState(initialFormState);
@@ -48,8 +55,12 @@ function Productos({ currentUserDisplayName }) {
     { name: "codigo", type: "string", required: "Sí", desc: "Código único de producto (clave de negocio, no duplicable)." },
     { name: "nombre", type: "string", required: "Sí", desc: "Nombre del producto." },
     { name: "descripcion", type: "string", required: "No", desc: "Descripción del producto." },
-    { name: "precioCompra", type: "number", required: "Sí", desc: "Precio unitario del producto (costo de compra)." },
-    { name: "stock", type: "number", required: "Sí", desc: "Cantidad de unidades del producto disponibles en el inventario." },
+    { name: "precioCompra", type: "number", required: "Sí", desc: "Precio unitario del producto para el proveedor principal seleccionado." },
+    { name: "preciosProveedor", type: "object (map)", required: "No", desc: "Precios unitarios por proveedor: { [proveedorId]: number }. Permite tener un precio distinto según el proveedor. Se actualiza al registrar compras." },
+    { name: "stockProveedor", type: "object (map)", required: "No", desc: "Cantidad de stock por proveedor: { [proveedorId]: number }. Se gestiona desde Compras e Inventario." },
+    { name: "proveedorId", type: "string", required: "No", desc: "ID del proveedor principal de quien se compra el producto." },
+    { name: "proveedorNombre", type: "string", required: "No", desc: "Nombre del proveedor principal (para visualización)." },
+    { name: "imagen", type: "string (base64)", required: "No", desc: "Imagen del producto en formato base64 (data URL). Se redimensiona a máximo 300px. Campo opcional." },
     { name: "estado", type: "string", required: "Sí", desc: "Estado del producto. Valores: 'Activo' | 'Inactivo'." },
     { name: "creadoPor", type: "string", required: "Sí", desc: "ID único (uid) del usuario administrador que creó el registro del producto." },
     { name: "registradoPor", type: "string", required: "Sí", desc: "Nombre del usuario administrador que registró al producto." },
@@ -64,7 +75,7 @@ function Productos({ currentUserDisplayName }) {
   // Suscripción en tiempo real a los productos de Firestore para el usuario activo
   useEffect(() => {
     if (!user) return;
-    
+
     setIsLoading(true);
     const unsubscribe = subscribeProductos(
       resolvedDisplayName,
@@ -93,6 +104,23 @@ function Productos({ currentUserDisplayName }) {
     return () => unsubscribe();
   }, [user, resolvedDisplayName]);
 
+  // Suscripción a proveedores activos para el selector de "Proveedor principal"
+  useEffect(() => {
+    if (!user) return;
+    const unsubscribe = subscribeProveedores(
+      resolvedDisplayName,
+      user.uid,
+      (updatedProveedores) => {
+        const active = updatedProveedores.filter((p) => p.estado === "Activo");
+        setProveedores(active);
+      },
+      (error) => {
+        console.error("Error al obtener proveedores para el selector de productos:", error);
+      }
+    );
+    return () => unsubscribe();
+  }, [user, resolvedDisplayName]);
+
   // Manejo de Alertas Temporales
   const triggerToast = (type, message) => {
     setToastAlert({ type, message });
@@ -107,6 +135,7 @@ function Productos({ currentUserDisplayName }) {
       (c.nombre || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
       (c.descripcion || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
       (c.codigo || "").includes(searchTerm) ||
+      (c.proveedorNombre || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
       (c.precio || "").toLowerCase().includes(searchTerm.toLowerCase());
       
     const matchesEstado = 
@@ -167,7 +196,7 @@ function Productos({ currentUserDisplayName }) {
       doc.setFont("helvetica", "bold");
       doc.setFontSize(18);
       doc.setTextColor(46, 92, 138); // #2E5C8A
-      doc.text("SessionApp — Base de Datos de Productos", 14, 20);
+      doc.text("AuroInventario — Base de Datos de Productos", 14, 20);
       
       doc.setFont("helvetica", "normal");
       doc.setFontSize(10);
@@ -191,7 +220,6 @@ function Productos({ currentUserDisplayName }) {
         "Nombre",
         "Descripción",
         "Precio Unitario",
-        "Stock",
         "Estado",
         "Registrado por",
         "Fecha"
@@ -202,7 +230,6 @@ function Productos({ currentUserDisplayName }) {
         producto.nombre || "",
         producto.descripcion || "",
         formatPrice(producto.precioCompra),
-        producto.stock || "—",
         producto.estado || "",
         producto.registradoPor || resolvedDisplayName,
         formatDate(producto.fechaCreacion)
@@ -218,7 +245,7 @@ function Productos({ currentUserDisplayName }) {
         alternateRowStyles: { fillColor: [248, 250, 253] },
       });
 
-      doc.save(`productos_${new Date().toISOString().slice(0, 10)}.pdf`);
+      doc.save(`productos_${getLocalDateString()}.pdf`);
     } catch (error) {
       console.error("Error al exportar PDF:", error);
       triggerToast("error", error.message || "Hubo un error al generar el PDF.");
@@ -232,7 +259,6 @@ function Productos({ currentUserDisplayName }) {
         "Nombre",
         "Descripción",
         "Precio Unitario",
-        "Stock",
         "Estado",
         "Registrado por",
         "Fecha"
@@ -243,7 +269,6 @@ function Productos({ currentUserDisplayName }) {
         producto.nombre || "",
         producto.descripcion || "",
         producto.precioCompra || 0,
-        producto.stock || 0,
         producto.estado || "",
         producto.registradoPor || resolvedDisplayName,
         formatDate(producto.fechaCreacion)
@@ -258,7 +283,7 @@ function Productos({ currentUserDisplayName }) {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.setAttribute("download", `productos_${new Date().toISOString().slice(0, 10)}.csv`);
+      link.setAttribute("download", `productos_${getLocalDateString()}.csv`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -271,12 +296,47 @@ function Productos({ currentUserDisplayName }) {
 
   // CRUD Event Handlers
   const handleInputChange = (e) => {
-    let { name, value } = e.target;
+    let { name, value, type } = e.target;
+    const caret = e.target.selectionStart;
+    const oldValue = value;
 
     // Formatear precio con separadores de miles
     if (name === "precio" || name === "precioCompra") {
       const numericValue = value.replace(/\D/g, "");
       value = numericValue ? new Intl.NumberFormat("es-CO").format(numericValue) : "";
+    }
+
+    // Convertir a mayúsculas los campos de texto
+    if (name !== "precio" && name !== "precioCompra") {
+      const esTexto = type === "text" || type === "search" || type === "tel" || type === "textarea";
+      if (esTexto) value = value.toUpperCase();
+    }
+
+    // Mantener la posición del cursor al transformar el valor
+    if (value !== oldValue) {
+      const newCaret = name === "precio" || name === "precioCompra"
+        ? getNewCaret(oldValue, value, caret)
+        : caret;
+      restoreCaret(e.target, newCaret);
+    }
+
+    // Guardar nombre del proveedor seleccionado y precargar su precio si existe
+    if (name === "proveedorId") {
+      const selectedProv = proveedores.find((p) => p.id === value);
+      setFormData((prev) => {
+        const precios = prev.preciosProveedor || {};
+        const precioDeProveedor = precios[value];
+        return {
+          ...prev,
+          proveedorId: value,
+          proveedorNombre: selectedProv?.nombre || "",
+          precioCompra: precioDeProveedor ? new Intl.NumberFormat("es-CO").format(precioDeProveedor) : prev.precioCompra
+        };
+      });
+      if (formErrors[name]) {
+        setFormErrors((prev) => ({ ...prev, [name]: "" }));
+      }
+      return;
     }
 
     setFormData((prev) => ({
@@ -328,13 +388,63 @@ function Productos({ currentUserDisplayName }) {
       nombre: producto.nombre || "",
       descripcion: producto.descripcion || "",
       precioCompra: producto.precioCompra ? new Intl.NumberFormat("es-CO").format(producto.precioCompra) : "",
-      stock: producto.stock || "",
+      proveedorId: producto.proveedorId || "",
+      proveedorNombre: producto.proveedorNombre || "",
+      preciosProveedor: producto.preciosProveedor || {},
+      imagen: producto.imagen || "",
       estado: producto.estado || "Activo"
     });
     setFormErrors({});
     setModalMode("edit");
     setCurrentProductoId(producto.id);
     setShowModal(true);
+  };
+
+  const handleImageChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target.result;
+
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const MAX_SIZE = 300;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_SIZE) {
+            height *= MAX_SIZE / width;
+            width = MAX_SIZE;
+          }
+        } else {
+          if (height > MAX_SIZE) {
+            width *= MAX_SIZE / height;
+            height = MAX_SIZE;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+
+        const base64Image = canvas.toDataURL("image/jpeg", 0.7);
+        setFormData((prev) => ({ ...prev, imagen: base64Image }));
+      };
+    };
+    reader.onerror = () => {
+      triggerToast("error", "No se pudo leer la imagen seleccionada.");
+    };
+  };
+
+  const removeImage = () => {
+    setFormData((prev) => ({ ...prev, imagen: "" }));
   };
 
   const handleSubmit = async (e) => {
@@ -355,10 +465,19 @@ function Productos({ currentUserDisplayName }) {
           return;
         }
 
+        const precioNuevo = Number(String(formData.precioCompra).replace(/\D/g, ""));
+        const preciosProveedor = {
+          ...(formData.preciosProveedor || {}),
+          ...(formData.proveedorId ? { [formData.proveedorId]: precioNuevo } : {})
+        };
+
         const dataToSave = {
           ...formData,
-          precioCompra: Number(String(formData.precioCompra).replace(/\D/g, "")),
-          stock: formData.stock ? Number(formData.stock) : 0,
+          precioCompra: precioNuevo,
+          preciosProveedor,
+          stockProveedor: {},
+          stock: 0,
+          stockMinimo: 0,
         };
 
         await addProducto(dataToSave, user.uid, resolvedDisplayName);
@@ -375,13 +494,20 @@ function Productos({ currentUserDisplayName }) {
           return;
         }
 
+        const precioNuevoEdit = Number(String(formData.precioCompra).replace(/\D/g, ""));
+        const preciosProveedorEdit = {
+          ...(formData.preciosProveedor || {}),
+          ...(formData.proveedorId ? { [formData.proveedorId]: precioNuevoEdit } : {})
+        };
+
         const dataToUpdate = {
           ...formData,
-          precioCompra: Number(String(formData.precioCompra).replace(/\D/g, "")),
-          stock: formData.stock ? Number(formData.stock) : 0,
+          precioCompra: precioNuevoEdit,
+          preciosProveedor: preciosProveedorEdit,
         };
 
         await updateProducto(resolvedDisplayName, currentProductoId, dataToUpdate);
+
         triggerToast("success", "¡Datos del producto actualizados correctamente!");
       }
       setShowModal(false);
@@ -570,11 +696,12 @@ function Productos({ currentUserDisplayName }) {
                 <table className="prod-table">
                   <thead>
                     <tr>
+                      <th>Imagen</th>
                       <th>Código</th>
                       <th>Nombre</th>
                       <th>Descripción</th>
                       <th>Precio Unitario</th>
-                      <th>Stock</th>
+                      <th>Proveedor</th>
                       <th>Estado</th>
                       <th>Registrado por</th>
                       <th>Fecha de Registro</th>
@@ -584,11 +711,18 @@ function Productos({ currentUserDisplayName }) {
                   <tbody>
                     {filteredProductos.map((producto) => (
                       <tr key={producto.id} className={`prod-row ${producto.estado.toLowerCase()}`}>
+                        <td>
+                          {producto.imagen ? (
+                            <img src={producto.imagen} alt={producto.nombre} className="prod-img-thumb" />
+                          ) : (
+                            <span className="prod-img-placeholder">—</span>
+                          )}
+                        </td>
                         <td className="prod-doc-num">{producto.codigo}</td>
                         <td className="prod-text-bold">{producto.nombre}</td>
                         <td className="prod-text-bold">{formatDescription(producto.descripcion)}</td>
                         <td>{formatPrice(producto.precioCompra)}</td>
-                        <td>{producto.stock || "—"}</td>
+                        <td>{producto.proveedorNombre || "—"}</td>
                         <td>
                           <span className={`prod-status-badge ${producto.estado.toLowerCase()}`}>
                             <span className="prod-status-dot"></span>
@@ -777,22 +911,74 @@ function Productos({ currentUserDisplayName }) {
                   )}
                 </div>
 
-                {/* Stock */}
-                <div className="prod-form-group">
-                  <label htmlFor="stock">Stock<span className="required-mark">*</span></label>
-                  <input 
-                    type="number" 
-                    id="stock"
-                    name="stock"
-                    placeholder="Ej. 100"
-                    value={formData.stock}
+                {/* Proveedor principal */}
+                <div className="prod-form-group span-2">
+                  <label htmlFor="proveedorId">Proveedor Principal</label>
+                  <select 
+                    id="proveedorId" 
+                    name="proveedorId"
+                    value={formData.proveedorId}
                     onChange={handleInputChange}
-                    className="prod-input"
-                  />
+                    className="prod-select"
+                  >
+                    <option value="">Sin proveedor asignado</option>
+                    {proveedores.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.nombre}{p.empresa ? ` — ${p.empresa}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Imagen del Producto */}
+                <div className="prod-form-group span-2">
+                  <label>Imagen del Producto</label>
+                  <div className="prod-img-field">
+                    {formData.imagen ? (
+                      <div className="prod-img-preview">
+                        <img src={formData.imagen} alt="Vista previa del producto" />
+                        <div className="prod-img-actions">
+                          <button type="button" className="prod-img-btn change" onClick={() => document.getElementById("productoImagenInput").click()}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M23 4v6h-6"></path>
+                              <path d="M1 20v-6h6"></path>
+                              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"></path>
+                              <path d="M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                            </svg>
+                            Cambiar
+                          </button>
+                          <button type="button" className="prod-img-btn remove" onClick={removeImage}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <line x1="18" y1="6" x2="6" y2="18"></line>
+                              <line x1="6" y1="6" x2="18" y2="18"></line>
+                            </svg>
+                            Quitar
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="prod-img-dropzone" onClick={() => document.getElementById("productoImagenInput").click()}>
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                          <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                          <polyline points="21 15 16 10 5 21"></polyline>
+                        </svg>
+                        <span>Haz clic para subir una imagen (opcional)</span>
+                        <small>JPG o PNG — se redimensiona automáticamente a máx. 300px</small>
+                      </div>
+                    )}
+                    <input
+                      type="file"
+                      id="productoImagenInput"
+                      accept="image/*"
+                      style={{ display: "none" }}
+                      onChange={handleImageChange}
+                    />
+                  </div>
                 </div>
 
                 {/* Estado */}
-                <div className="prod-form-group">
+                <div className="prod-form-group span-2">
                   <label htmlFor="estado">Estado del Producto<span className="required-mark">*</span></label>
                   <select 
                     id="estado" 

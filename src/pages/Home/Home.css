@@ -87,6 +87,32 @@
   padding: 20px 10px;
 }
 
+/* Flecha para reabrir el sidebar cuando está colapsado */
+.home-sidebar.collapsed .sidebar-expand-btn {
+  position: absolute;
+  right: -14px;
+  top: 22px;
+  width: 28px;
+  height: 28px;
+  margin: 0;
+  background: #4A90E2;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  z-index: 20;
+}
+
+.home-sidebar.collapsed .sidebar-expand-btn:hover {
+  background: #2E5C8A;
+  transform: scale(1.1);
+}
+
 /* ---- Nav ---- */
 .sidebar-nav {
   padding: 16px 12px;
@@ -1252,14 +1278,17 @@
 }
 
 .portal-container {
+  position: relative;
   width: 100%;
-  max-width: 550px;
-  background: rgba(255, 255, 255, 0.05);
+  max-width: 560px;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.03) 100%);
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 32px;
-  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.4);
+  box-shadow:
+    0 30px 70px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
   padding: 56px 40px;
   display: flex;
   flex-direction: column;
@@ -1267,6 +1296,31 @@
   gap: 36px;
   text-align: center;
   animation: portalFadeIn 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+}
+
+.portal-container::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 180px;
+  height: 3px;
+  border-radius: 0 0 8px 8px;
+  background: linear-gradient(90deg, transparent, #4A90E2, #7cd0ff, #4A90E2, transparent);
+}
+
+.portal-container::after {
+  content: "";
+  position: absolute;
+  width: 260px;
+  height: 260px;
+  top: -120px;
+  right: -120px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(74, 144, 226, 0.25) 0%, transparent 70%);
+  pointer-events: none;
 }
 
 @keyframes portalFadeIn {
@@ -1294,23 +1348,47 @@
   flex-shrink: 0;
 }
 
-.portal-avatar {
-  width: 150px;
-  height: 150px;
+.portal-avatar-ring {
+  position: relative;
+  width: 158px;
+  height: 158px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #4A90E2, #2E5C8A);
+  padding: 5px;
+  background: conic-gradient(from 180deg, #4A90E2, #7cd0ff, #7c3aed, #4A90E2);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.15),
+    0 16px 40px rgba(74, 144, 226, 0.35);
+  animation: portalRingPulse 3s ease-in-out infinite;
+}
+
+.portal-avatar-ring.uploading .portal-avatar {
+  opacity: 0.55;
+}
+
+@keyframes portalRingPulse {
+  0%, 100% {
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.15),
+      0 16px 40px rgba(74, 144, 226, 0.35);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.15),
+      0 16px 50px rgba(124, 208, 255, 0.55);
+  }
+}
+
+.portal-avatar {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #2E5C8A, #1b3d60);
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  border: 4px solid rgba(255, 255, 255, 0.25);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
-  transition: transform 0.3s ease, border-color 0.3s ease;
-}
-
-.portal-avatar:hover {
-  transform: scale(1.03);
-  border-color: #4A90E2;
+  border: 3px solid #0f2338;
+  transition: opacity 0.3s ease;
 }
 
 .portal-avatar img {
@@ -1326,18 +1404,38 @@
   text-transform: uppercase;
 }
 
-.portal-avatar.uploading {
-  opacity: 0.6;
+.portal-avatar-overlay {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: rgba(11, 24, 39, 0.65);
+  backdrop-filter: blur(2px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: white;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 0.25s ease;
+}
+
+.portal-avatar-container:hover .portal-avatar-overlay {
+  opacity: 1;
 }
 
 .portal-change-photo-badge {
   position: absolute;
   bottom: 4px;
   right: 4px;
-  width: 36px;
-  height: 36px;
+  width: 38px;
+  height: 38px;
   border-radius: 50%;
-  background: #2E5C8A;
+  background: linear-gradient(135deg, #4A90E2, #2E5C8A);
   border: 3px solid #0f2338;
   color: white;
   display: flex;
@@ -1345,12 +1443,13 @@
   justify-content: center;
   cursor: pointer;
   transition: all 0.25s ease;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  z-index: 2;
 }
 
 .portal-change-photo-badge:hover {
-  background: #4A90E2;
-  transform: scale(1.1);
+  background: linear-gradient(135deg, #5ba1f3, #3e8ad3);
+  transform: scale(1.12);
 }
 
 .portal-user-details {

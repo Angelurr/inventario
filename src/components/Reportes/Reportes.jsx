@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "../../context/AuthContext";
 import { subscribeVentas } from "../../services/ventasService";
+import { getLocalDateString } from "../../utils/dateUtils";
 import "./Reportes.css";
 
 function Reportes({ currentUserDisplayName }) {
@@ -67,6 +68,24 @@ function Reportes({ currentUserDisplayName }) {
     return new Date(v.fechaCreacion);
   };
 
+  // Helpers para soportar ventas con múltiples productos (campo items)
+  // y mantener compatibilidad con ventas antiguas de un solo producto.
+  const getVentaItems = (v) => {
+    if (v && Array.isArray(v.items) && v.items.length) return v.items;
+    return v
+      ? [{
+          producto: v.producto || "Desconocido",
+          cantidad: Number(v.cantidad) || 0,
+          precioCompra: Number(v.precioCompra) || 0,
+          precioVenta: Number(v.precioVenta) || 0,
+        }]
+      : [];
+  };
+  const getVentaQty = (v) => getVentaItems(v).reduce((acc, i) => acc + (Number(i.cantidad) || 0), 0);
+  const getVentaReceived = (v) => (Number(v.total) || 0) - (Number(v.saldoPendiente) || 0);
+  const getVentaCost = (v) => getVentaItems(v).reduce((acc, i) => acc + ((Number(i.cantidad) || 0) * (Number(i.precioCompra) || 0)), 0);
+  const getVentaProfit = (v) => Math.max(0, getVentaReceived(v) - getVentaCost(v));
+
   // Filtrar ventas por período
   const getFilteredVentas = () => {
     const now = new Date();
@@ -107,24 +126,15 @@ function Reportes({ currentUserDisplayName }) {
   const totalTransacciones = filteredVentas.length;
 
   const totalVendido = filteredVentas.reduce((acc, curr) => {
-    const total = Number(curr.total) || 0;
-    const pending = Number(curr.saldoPendiente) || 0;
-    return acc + (total - pending);
+    return acc + getVentaReceived(curr);
   }, 0);
 
   const totalGanancias = filteredVentas.reduce((acc, curr) => {
-    const total = Number(curr.total) || 0;
-    const pending = Number(curr.saldoPendiente) || 0;
-    const qty = Number(curr.cantidad) || 0;
-    const buyPrice = Number(curr.precioCompra) || 0;
-    const cost = qty * buyPrice;
-    const received = total - pending;
-    const profit = Math.max(0, received - cost);
-    return acc + profit;
+    return acc + getVentaProfit(curr);
   }, 0);
 
   const totalProductosVendidos = filteredVentas.reduce((acc, curr) => {
-    return acc + (Number(curr.cantidad) || 0);
+    return acc + getVentaQty(curr);
   }, 0);
 
   const clientesAtendidos = new Set(
@@ -135,40 +145,31 @@ function Reportes({ currentUserDisplayName }) {
 
   // Calcular totales históricos acumulados
   const allTimeRevenue = ventas.reduce((acc, curr) => {
-    const total = Number(curr.total) || 0;
-    const pending = Number(curr.saldoPendiente) || 0;
-    return acc + (total - pending);
+    return acc + getVentaReceived(curr);
   }, 0);
 
   const allTimeProfit = ventas.reduce((acc, curr) => {
-    const total = Number(curr.total) || 0;
-    const pending = Number(curr.saldoPendiente) || 0;
-    const qty = Number(curr.cantidad) || 0;
-    const buyPrice = Number(curr.precioCompra) || 0;
-    const cost = qty * buyPrice;
-    const received = total - pending;
-    const profit = Math.max(0, received - cost);
-    return acc + profit;
+    return acc + getVentaProfit(curr);
   }, 0);
 
   // Calcular ranking de productos del período filtrado
   const productGroup = {};
   filteredVentas.forEach((v) => {
-    const prodName = v.producto || "Desconocido";
-    const qty = Number(v.cantidad) || 0;
-    const total = Number(v.total) || 0;
-    const pending = Number(v.saldoPendiente) || 0;
-    const received = total - pending;
+    getVentaItems(v).forEach((it) => {
+      const prodName = it.producto || "Desconocido";
+      const qty = Number(it.cantidad) || 0;
+      const received = (Number(it.cantidad) || 0) * (Number(it.precioVenta) || 0);
 
-    if (!productGroup[prodName]) {
-      productGroup[prodName] = {
-        name: prodName,
-        cantidad: 0,
-        ingresos: 0,
-      };
-    }
-    productGroup[prodName].cantidad += qty;
-    productGroup[prodName].ingresos += received;
+      if (!productGroup[prodName]) {
+        productGroup[prodName] = {
+          name: prodName,
+          cantidad: 0,
+          ingresos: 0,
+        };
+      }
+      productGroup[prodName].cantidad += qty;
+      productGroup[prodName].ingresos += received;
+    });
   });
   const rankedProducts = Object.values(productGroup).sort((a, b) => b.cantidad - a.cantidad);
   const topProduct = rankedProducts[0] || { name: "Ninguno", cantidad: 0, ingresos: 0 };
@@ -203,16 +204,8 @@ function Reportes({ currentUserDisplayName }) {
       const d = getSaleDate(v);
       if (d.getMonth() === monthIdx && d.getFullYear() === yearVal) {
         count += 1;
-        const total = Number(v.total) || 0;
-        const pending = Number(v.saldoPendiente) || 0;
-        const qty = Number(v.cantidad) || 0;
-        const buyPrice = Number(v.precioCompra) || 0;
-        const cost = qty * buyPrice;
-        const received = total - pending;
-        const profit = Math.max(0, received - cost);
-
-        totalVendido += received;
-        totalGanado += profit;
+        totalVendido += getVentaReceived(v);
+        totalGanado += getVentaProfit(v);
       }
     });
     return { count, totalVendido, totalGanado };
@@ -247,17 +240,9 @@ function Reportes({ currentUserDisplayName }) {
         };
       }
 
-      const total = Number(v.total) || 0;
-      const pending = Number(v.saldoPendiente) || 0;
-      const qty = Number(v.cantidad) || 0;
-      const buyPrice = Number(v.precioCompra) || 0;
-      const cost = qty * buyPrice;
-      const received = total - pending;
-      const profit = Math.max(0, received - cost);
-
       monthsMap[monthKey].count += 1;
-      monthsMap[monthKey].totalVendido += received;
-      monthsMap[monthKey].totalGanado += profit;
+      monthsMap[monthKey].totalVendido += getVentaReceived(v);
+      monthsMap[monthKey].totalGanado += getVentaProfit(v);
     });
 
     return Object.values(monthsMap).sort((a, b) => b.key.localeCompare(a.key));
@@ -288,7 +273,7 @@ function Reportes({ currentUserDisplayName }) {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.setAttribute("download", `resumen_mensual_${new Date().toISOString().slice(0, 10)}.csv`);
+      link.setAttribute("download", `resumen_mensual_${getLocalDateString()}.csv`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -327,7 +312,7 @@ function Reportes({ currentUserDisplayName }) {
       doc.setFont("helvetica", "bold");
       doc.setFontSize(18);
       doc.setTextColor(46, 92, 138); // #2E5C8A
-      doc.text("SessionApp — Reporte Métricas Comerciales", 14, 20);
+      doc.text("AuroInventario — Reporte Métricas Comerciales", 14, 20);
 
       // Detalles
       doc.setFont("helvetica", "normal");
@@ -412,25 +397,28 @@ function Reportes({ currentUserDisplayName }) {
       doc.text("Detalle de Ventas del Período (¿Qué se vendió?)", 14, nextY2);
 
       const transColumns = ["Fecha", "Cliente", "Producto", "Cant.", "Total", "Utilidad", "Pago", "Estado"];
-      const transRows = filteredVentas.map(v => {
-        const total = Number(v.total) || 0;
-        const pending = Number(v.saldoPendiente) || 0;
-        const qty = Number(v.cantidad) || 0;
-        const buyPrice = Number(v.precioCompra) || 0;
-        const cost = qty * buyPrice;
-        const received = total - pending;
-        const profit = Math.max(0, received - cost);
+      const transRows = [];
+      filteredVentas.forEach(v => {
+        const ventaItems = getVentaItems(v);
+        ventaItems.forEach((it) => {
+          const qty = Number(it.cantidad) || 0;
+          const sell = Number(it.precioVenta) || 0;
+          const buy = Number(it.precioCompra) || 0;
+          const received = qty * sell;
+          const cost = qty * buy;
+          const profit = Math.max(0, received - cost);
 
-        return [
-          formatDate(v.fechaCreacion),
-          v.clienteNombre || "Cliente General",
-          v.producto || "—",
-          String(qty),
-          formatCurrency(received),
-          formatCurrency(profit),
-          v.metodoPago || "—",
-          v.estado || "—"
-        ];
+          transRows.push([
+            formatDate(v.fechaCreacion),
+            v.clienteNombre || "Cliente General",
+            it.producto || "—",
+            String(qty),
+            formatCurrency(received),
+            formatCurrency(profit),
+            v.metodoPago || "—",
+            v.estado || "—"
+          ]);
+        });
       });
 
       doc.autoTable({
@@ -443,7 +431,7 @@ function Reportes({ currentUserDisplayName }) {
         alternateRowStyles: { fillColor: [248, 250, 253] }
       });
 
-      doc.save(`reporte_comercial_${filterPeriod}_${new Date().toISOString().slice(0, 10)}.pdf`);
+      doc.save(`reporte_comercial_${filterPeriod}_${getLocalDateString()}.pdf`);
     } catch (error) {
       console.error("Error al exportar PDF:", error);
     }
@@ -872,34 +860,36 @@ function Reportes({ currentUserDisplayName }) {
                   </thead>
                   <tbody>
                     {filteredVentas.map((v) => {
-                      const total = Number(v.total) || 0;
-                      const pending = Number(v.saldoPendiente) || 0;
-                      const qty = Number(v.cantidad) || 0;
-                      const buyPrice = Number(v.precioCompra) || 0;
-                      const cost = qty * buyPrice;
-                      const received = total - pending;
-                      const profit = Math.max(0, received - cost);
+                      const ventaItems = getVentaItems(v);
+                      return ventaItems.map((it) => {
+                        const qty = Number(it.cantidad) || 0;
+                        const sell = Number(it.precioVenta) || 0;
+                        const buy = Number(it.precioCompra) || 0;
+                        const received = qty * sell;
+                        const cost = qty * buy;
+                        const profit = Math.max(0, received - cost);
 
-                      return (
-                        <tr className="rep-row" key={v.id}>
-                          <td>{formatDate(v.fechaCreacion)}</td>
-                          <td className="rep-text-bold">{v.clienteNombre || "Cliente General"}</td>
-                          <td>{v.producto || "—"}</td>
-                          <td>{qty}</td>
-                          <td className="rep-val-sales">{formatCurrency(received)}</td>
-                          <td className="rep-val-earnings">{formatCurrency(profit)}</td>
-                          <td>
-                            <span className={`rep-badge payment ${v.metodoPago?.toLowerCase() || ""}`}>
-                              {v.metodoPago || "—"}
-                            </span>
-                          </td>
-                          <td>
-                            <span className={`rep-badge status ${v.estado?.toLowerCase() || ""}`}>
-                              {v.estado || "—"}
-                            </span>
-                          </td>
-                        </tr>
-                      );
+                        return (
+                          <tr className="rep-row" key={`${v.id}-${it.producto || "x"}`}>
+                            <td>{formatDate(v.fechaCreacion)}</td>
+                            <td className="rep-text-bold">{v.clienteNombre || "Cliente General"}</td>
+                            <td>{it.producto || "—"}</td>
+                            <td>{qty}</td>
+                            <td className="rep-val-sales">{formatCurrency(received)}</td>
+                            <td className="rep-val-earnings">{formatCurrency(profit)}</td>
+                            <td>
+                              <span className={`rep-badge payment ${v.metodoPago?.toLowerCase() || ""}`}>
+                                {v.metodoPago || "—"}
+                              </span>
+                            </td>
+                            <td>
+                              <span className={`rep-badge status ${v.estado?.toLowerCase() || ""}`}>
+                                {v.estado || "—"}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      });
                     })}
                   </tbody>
                 </table>

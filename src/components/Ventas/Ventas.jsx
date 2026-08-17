@@ -8,6 +8,9 @@ import {
 } from "../../services/ventasService";
 import { subscribeClientes } from "../../services/clientesService";
 import { subscribeProductos, updateProducto } from "../../services/productosService";
+import { addMovimiento } from "../../services/movimientosService";
+import { restoreCaret, getNewCaret } from "../../utils/caretUtils";
+import { getLocalDateString } from "../../utils/dateUtils";
 import "./Ventas.css";
 
 function Ventas({ currentUserDisplayName }) {
@@ -32,16 +35,12 @@ function Ventas({ currentUserDisplayName }) {
   // Estados del Formulario
   const initialFormState = {
     clienteId: "",
-    productoId: "",
-    producto: "",
-    cantidad: 1,
-    precioCompra: 0,
-    precioVenta: 0,
     metodoPago: "Efectivo",
     estado: "Completada",
     saldoPendiente: 0
   };
   const [formData, setFormData] = useState(initialFormState);
+  const [cartItems, setCartItems] = useState([]); // Arreglo de productos a vender: { productoId, producto, cantidad, precioCompra, precioVenta }
   const [formErrors, setFormErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
 
@@ -53,8 +52,9 @@ function Ventas({ currentUserDisplayName }) {
     { name: "id", type: "string", required: "Sí (Autogenerado)", desc: "Identificador único de la venta asignado automáticamente por Firestore." },
     { name: "clienteId", type: "string", required: "Sí", desc: "ID del documento del cliente asociado." },
     { name: "clienteNombre", type: "string", required: "Sí", desc: "Nombre completo del cliente al momento de registrar la venta." },
-    { name: "producto", type: "string", required: "Sí", desc: "Nombre del producto vendido." },
-    { name: "cantidad", type: "number", required: "Sí", desc: "Cantidad de artículos vendidos." },
+    { name: "producto", type: "string", required: "Sí", desc: "Nombre del producto vendido (primero de la venta)." },
+    { name: "items", type: "array<object>", required: "Sí", desc: "Lista de productos de la venta. Cada elemento: { productoId, producto, cantidad, precioCompra, precioVenta, subtotal }. Permite registrar varios productos en una misma venta." },
+    { name: "cantidad", type: "number", required: "Sí", desc: "Cantidad total de artículos vendidos (suma de todos los items)." },
     { name: "precioCompra", type: "number", required: "Sí", desc: "Precio unitario de compra (al costo)." },
     { name: "precioVenta", type: "number", required: "Sí", desc: "Precio al que se vende al cliente." },
     { name: "total", type: "number", required: "Sí", desc: "Total de la transacción (cantidad * precioVenta)." },
@@ -136,9 +136,16 @@ function Ventas({ currentUserDisplayName }) {
   };
 
   // Filtros aplicados sobre los datos en tiempo real
+  const ventaProductNames = (v) => {
+    if (v && Array.isArray(v.items) && v.items.length) {
+      return v.items.map((it) => it.producto || "").join(" ");
+    }
+    return v.producto || "";
+  };
+
   const filteredVentas = ventas.filter((v) => {
     const matchesSearch =
-      (v.producto || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+      ventaProductNames(v).toLowerCase().includes(searchTerm.toLowerCase()) ||
       (v.clienteNombre || "").toLowerCase().includes(searchTerm.toLowerCase());
       
     const matchesEstado = 
@@ -199,7 +206,7 @@ function Ventas({ currentUserDisplayName }) {
       doc.setFont("helvetica", "bold");
       doc.setFontSize(18);
       doc.setTextColor(125, 60, 152); // #7D3C98
-      doc.text("SessionApp — Registro de Ventas", 14, 20);
+      doc.text("AuroInventario — Registro de Ventas", 14, 20);
       
       doc.setFont("helvetica", "normal");
       doc.setFontSize(10);
@@ -233,22 +240,31 @@ function Ventas({ currentUserDisplayName }) {
         "Registrado por",
         "Fecha"
       ];
-      
-      const tableRows = filteredVentas.map((v) => [
-        v.clienteNombre || "—",
-        v.producto || "",
-        v.cantidad || 0,
-        formatCurrency(v.precioCompra || 0),
-        formatCurrency(v.precioVenta || 0),
-        formatCurrency((v.cantidad || 0) * (v.precioCompra || 0)),
-        formatCurrency((v.total || 0) - (v.saldoPendiente || 0)),
-        formatCurrency(Math.max(0, ((v.total || 0) - (v.saldoPendiente || 0)) - ((v.cantidad || 0) * (v.precioCompra || 0)))),
-        v.metodoPago || "",
-        v.estado || "",
-        v.estado === "Pendiente" ? formatCurrency(v.saldoPendiente || 0) : "—",
-        v.registradoPor || resolvedDisplayName,
-        formatDate(v.fechaCreacion)
-      ]);
+
+      const tableRows = [];
+      filteredVentas.forEach((v) => {
+        const ventaItems = Array.isArray(v.items) && v.items.length ? v.items : [v];
+        ventaItems.forEach((it) => {
+          const qty = Number(it.cantidad) || 0;
+          const buy = Number(it.precioCompra) || 0;
+          const sell = Number(it.precioVenta) || 0;
+          tableRows.push([
+            v.clienteNombre || "—",
+            it.producto || "",
+            qty,
+            formatCurrency(buy),
+            formatCurrency(sell),
+            formatCurrency(qty * buy),
+            formatCurrency(qty * sell),
+            formatCurrency(Math.max(0, (qty * sell) - (qty * buy))),
+            v.metodoPago || "",
+            v.estado || "",
+            v.estado === "Pendiente" ? formatCurrency(v.saldoPendiente || 0) : "—",
+            v.registradoPor || resolvedDisplayName,
+            formatDate(v.fechaCreacion)
+          ]);
+        });
+      });
 
       doc.autoTable({
         head: [tableColumns],
@@ -260,7 +276,7 @@ function Ventas({ currentUserDisplayName }) {
         alternateRowStyles: { fillColor: [248, 250, 253] },
       });
 
-      doc.save(`ventas_${new Date().toISOString().slice(0, 10)}.pdf`);
+      doc.save(`ventas_${getLocalDateString()}.pdf`);
     } catch (error) {
       console.error("Error al exportar PDF:", error);
       triggerToast("error", error.message || "Hubo un error al generar el PDF.");
@@ -285,30 +301,29 @@ function Ventas({ currentUserDisplayName }) {
         "Fecha"
       ];
       
-      const rows = filteredVentas.map((v) => {
-        const total = Number(v.total) || 0;
-        const pending = Number(v.saldoPendiente) || 0;
-        const qty = Number(v.cantidad) || 0;
-        const buy = Number(v.precioCompra) || 0;
-        const cost = qty * buy;
-        const received = total - pending;
-        const profit = Math.max(0, received - cost);
-
-        return [
-          v.clienteNombre || "—",
-          v.producto || "",
-          qty,
-          buy,
-          Number(v.precioVenta) || 0,
-          cost,
-          received,
-          profit,
-          v.metodoPago || "",
-          v.estado || "",
-          pending,
-          v.registradoPor || resolvedDisplayName,
-          formatDate(v.fechaCreacion)
-        ];
+      const rows = [];
+      filteredVentas.forEach((v) => {
+        const ventaItems = Array.isArray(v.items) && v.items.length ? v.items : [v];
+        ventaItems.forEach((it) => {
+          const qty = Number(it.cantidad) || 0;
+          const buy = Number(it.precioCompra) || 0;
+          const sell = Number(it.precioVenta) || 0;
+          rows.push([
+            v.clienteNombre || "—",
+            it.producto || "",
+            qty,
+            buy,
+            sell,
+            qty * buy,
+            qty * sell,
+            Math.max(0, (qty * sell) - (qty * buy)),
+            v.metodoPago || "",
+            v.estado || "",
+            v.estado === "Pendiente" ? Number(v.saldoPendiente) || 0 : 0,
+            v.registradoPor || resolvedDisplayName,
+            formatDate(v.fechaCreacion)
+          ]);
+        });
       });
 
       const csvContent = "\uFEFF" + [
@@ -320,7 +335,7 @@ function Ventas({ currentUserDisplayName }) {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.setAttribute("download", `ventas_${new Date().toISOString().slice(0, 10)}.csv`);
+      link.setAttribute("download", `ventas_${getLocalDateString()}.csv`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -333,33 +348,28 @@ function Ventas({ currentUserDisplayName }) {
 
   // CRUD Event Handlers
   const handleInputChange = (e) => {
-    let { name, value } = e.target;
+    let { name, value, type } = e.target;
+    const caret = e.target.selectionStart;
+    const oldValue = value;
 
-    // Formatear precios y saldo con separadores de miles
-    if (name === "precioCompra" || name === "precioVenta" || name === "saldoPendiente") {
+    // Formatear saldo con separadores de miles
+    if (name === "saldoPendiente") {
       const numericValue = value.replace(/\D/g, "");
       value = numericValue ? new Intl.NumberFormat("es-CO").format(numericValue) : "";
     }
 
-    if (name === "productoId") {
-      const selectedProd = productos.find(p => p.id === value);
-      if (selectedProd) {
-        setFormData((prev) => ({
-          ...prev,
-          productoId: value,
-          producto: selectedProd.nombre,
-          precioCompra: selectedProd.precioCompra ? new Intl.NumberFormat("es-CO").format(selectedProd.precioCompra) : "0",
-          precioVenta: ""
-        }));
-        setFormErrors((prev) => ({
-          ...prev,
-          productoId: "",
-          producto: "",
-          precioCompra: "",
-          precioVenta: ""
-        }));
-        return;
-      }
+    // Convertir a mayúsculas los campos de texto
+    if (name !== "saldoPendiente") {
+      const esTexto = type === "text" || type === "search" || type === "tel" || type === "textarea";
+      if (esTexto) value = value.toUpperCase();
+    }
+
+    // Mantener la posición del cursor al transformar el valor
+    if (value !== oldValue) {
+      const newCaret = name === "saldoPendiente"
+        ? getNewCaret(oldValue, value, caret)
+        : caret;
+      restoreCaret(e.target, newCaret);
     }
 
     setFormData((prev) => ({
@@ -372,54 +382,132 @@ function Ventas({ currentUserDisplayName }) {
     }
   };
 
+  // ==== LÓGICA DEL CARRITO DE PRODUCTOS ====
+  const formatCurrencyInput = (value) => {
+    const n = Number(value) || 0;
+    return n ? new Intl.NumberFormat("es-CO").format(n) : "";
+  };
+
+  const getVentaItems = (venta) => {
+    if (venta && Array.isArray(venta.items) && venta.items.length) return venta.items;
+    if (!venta) return [];
+    return [{
+      productoId: venta.productoId || "",
+      producto: venta.producto || "",
+      cantidad: Number(venta.cantidad) || 1,
+      precioCompra: Number(venta.precioCompra) || 0,
+      precioVenta: Number(venta.precioVenta) || 0,
+    }];
+  };
+
+  const ajustarStockProveedor = (product, cantidad, signo) => {
+    const stockProveedor = { ...(product.stockProveedor || {}) };
+    if (product.proveedorId && stockProveedor[product.proveedorId] !== undefined) {
+      stockProveedor[product.proveedorId] = Math.max(0, (Number(stockProveedor[product.proveedorId]) || 0) + signo * cantidad);
+    }
+    return stockProveedor;
+  };
+
+  const addCartItem = () => {
+    setCartItems((prev) => [
+      ...prev,
+      { productoId: "", producto: "", cantidad: 1, precioCompra: 0, precioVenta: 0 }
+    ]);
+  };
+
+  const handleCartProductChange = (index, productoId) => {
+    const selectedProd = productos.find(p => p.id === productoId);
+    setCartItems((prev) => prev.map((item, i) =>
+      i === index
+        ? {
+            ...item,
+            productoId,
+            producto: selectedProd?.nombre || "",
+            precioCompra: selectedProd?.precioCompra || 0,
+            precioVenta: selectedProd?.precioVenta || 0
+          }
+        : item
+    ));
+    if (formErrors[`item-${index}`]) {
+      setFormErrors((prev) => ({ ...prev, [`item-${index}`]: "" }));
+    }
+  };
+
+  const handleCartFieldChange = (index, field, value) => {
+    setCartItems((prev) => prev.map((item, i) => {
+      if (i !== index) return item;
+      if (field === "precioCompra" || field === "precioVenta") {
+        const numericValue = value.replace(/\D/g, "");
+        return { ...item, [field]: numericValue ? Number(numericValue) : 0 };
+      }
+      return { ...item, [field]: value };
+    }));
+    if (formErrors[`item-${index}`]) {
+      setFormErrors((prev) => ({ ...prev, [`item-${index}`]: "" }));
+    }
+  };
+
+  const removeCartItem = (index) => {
+    setCartItems((prev) => prev.filter((_, i) => i !== index));
+    setFormErrors((prev) => {
+      const next = { ...prev };
+      delete next[`item-${index}`];
+      return next;
+    });
+  };
+
   const validateForm = () => {
     const errors = {};
     if (!formData.clienteId) errors.clienteId = "Debe seleccionar un cliente";
-    
-    if (!formData.productoId) {
-      errors.productoId = "Debe seleccionar un producto";
-    } else {
-      const selectedProduct = productos.find(p => p.id === formData.productoId);
+
+    if (cartItems.length === 0) {
+      errors.items = "Agregue al menos un producto a la venta";
+    }
+
+    cartItems.forEach((item, index) => {
+      if (!item.productoId) {
+        errors[`item-${index}`] = "Seleccione un producto";
+        return;
+      }
+
+      const selectedProduct = productos.find(p => p.id === item.productoId);
       if (!selectedProduct) {
-        errors.productoId = "El producto seleccionado no existe o está inactivo";
-      } else {
-        const cantidadInput = Number(formData.cantidad);
-        if (!formData.cantidad || cantidadInput <= 0) {
-          errors.cantidad = "La cantidad debe ser mayor a 0";
-        } else {
-          let availableStock = selectedProduct.stock || 0;
+        errors[`item-${index}`] = "El producto seleccionado no existe o está inactivo";
+        return;
+      }
 
-          if (modalMode === "edit" && currentVentaId) {
-            const originalVenta = ventas.find(v => v.id === currentVentaId);
-            if (originalVenta && (originalVenta.productoId === formData.productoId || originalVenta.producto === selectedProduct.nombre)) {
-              availableStock += originalVenta.cantidad || 0;
-            }
-          }
+      const cantidadInput = Number(item.cantidad);
+      if (!item.cantidad || cantidadInput <= 0) {
+        errors[`item-${index}`] = "La cantidad debe ser mayor a 0";
+        return;
+      }
 
-          if (cantidadInput > availableStock) {
-            errors.cantidad = `La cantidad supera el stock disponible (${availableStock} unidades)`;
-          }
+      let availableStock = selectedProduct.stock || 0;
+      if (modalMode === "edit" && currentVentaId) {
+        const originalVenta = ventas.find(v => v.id === currentVentaId);
+        const originalItems = getVentaItems(originalVenta);
+        const originalItem = originalItems.find(o => o.productoId === item.productoId || o.producto === item.producto);
+        if (originalItem) {
+          availableStock += Number(originalItem.cantidad) || 0;
         }
       }
-    }
 
-    const precioCompraNumerico = Number(String(formData.precioCompra).replace(/\D/g, ""));
-    if (formData.precioCompra === undefined || formData.precioCompra === "" || precioCompraNumerico < 0) {
-      errors.precioCompra = "El precio de compra unitario debe ser igual o mayor a 0";
-    }
+      if (cantidadInput > availableStock) {
+        errors[`item-${index}`] = `La cantidad supera el stock disponible (${availableStock} unidades)`;
+        return;
+      }
 
-    const precioVentaNumerico = Number(String(formData.precioVenta).replace(/\D/g, ""));
-    if (formData.precioVenta === undefined || formData.precioVenta === "" || precioVentaNumerico <= 0) {
-      errors.precioVenta = "El precio a vender debe ser mayor a 0";
-    }
+      if (!item.precioVenta || Number(item.precioVenta) <= 0) {
+        errors[`item-${index}`] = "El precio a vender debe ser mayor a 0";
+      }
+    });
 
     if (formData.estado === "Pendiente") {
-      const totalVenta = Number(formData.cantidad || 0) * precioVentaNumerico;
       const saldoNumerico = Number(String(formData.saldoPendiente || "0").replace(/\D/g, ""));
       if (saldoNumerico <= 0) {
         errors.saldoPendiente = "El monto pendiente debe ser mayor a cero";
-      } else if (saldoNumerico > totalVenta) {
-        errors.saldoPendiente = `El monto pendiente no puede superar el total de la venta ($${new Intl.NumberFormat("es-CO").format(totalVenta)})`;
+      } else if (saldoNumerico > totalCalculado) {
+        errors.saldoPendiente = `El monto pendiente no puede superar el total de la venta (${formatCurrency(totalCalculado)})`;
       }
     }
 
@@ -438,13 +526,17 @@ function Ventas({ currentUserDisplayName }) {
     }
     setFormData({
       ...initialFormState,
-      clienteId: clientes[0]?.id || "",
-      productoId: productos[0]?.id || "",
-      producto: productos[0]?.nombre || "",
-      precioCompra: productos[0]?.precioCompra ? new Intl.NumberFormat("es-CO").format(productos[0].precioCompra) : "0",
-      precioVenta: "",
-      saldoPendiente: 0
+      clienteId: clientes[0]?.id || ""
     });
+    setCartItems([
+      {
+        productoId: productos[0]?.id || "",
+        producto: productos[0]?.nombre || "",
+        cantidad: 1,
+        precioCompra: productos[0]?.precioCompra || 0,
+        precioVenta: productos[0]?.precioVenta || 0
+      }
+    ]);
     setFormErrors({});
     setModalMode("create");
     setCurrentVentaId(null);
@@ -452,14 +544,17 @@ function Ventas({ currentUserDisplayName }) {
   };
 
   const openEditModal = (venta) => {
-    const matchedProduct = productos.find(p => p.id === venta.productoId || p.nombre === venta.producto);
+    setCartItems(
+      getVentaItems(venta).map((it) => ({
+        productoId: it.productoId || "",
+        producto: it.producto || "",
+        cantidad: Number(it.cantidad) || 1,
+        precioCompra: Number(it.precioCompra) || 0,
+        precioVenta: Number(it.precioVenta) || 0
+      }))
+    );
     setFormData({
       clienteId: venta.clienteId || "",
-      productoId: matchedProduct?.id || venta.productoId || "",
-      producto: venta.producto || "",
-      cantidad: venta.cantidad || 1,
-      precioCompra: venta.precioCompra ? new Intl.NumberFormat("es-CO").format(venta.precioCompra) : "0",
-      precioVenta: venta.precioVenta ? new Intl.NumberFormat("es-CO").format(venta.precioVenta) : "",
       metodoPago: venta.metodoPago || "Efectivo",
       estado: venta.estado || "Completada",
       saldoPendiente: venta.saldoPendiente ? new Intl.NumberFormat("es-CO").format(venta.saldoPendiente) : 0
@@ -482,62 +577,94 @@ function Ventas({ currentUserDisplayName }) {
         ? `${selectedClientObj.nombres} ${selectedClientObj.apellidos}`.trim()
         : "Cliente Desconocido";
 
+      const items = cartItems.map((it) => ({
+        productoId: it.productoId,
+        producto: it.producto,
+        cantidad: Number(it.cantidad),
+        precioCompra: Number(it.precioCompra),
+        precioVenta: Number(it.precioVenta)
+      }));
+
       const dataToSave = {
         ...formData,
         clienteNombre,
-        precioCompra: Number(String(formData.precioCompra).replace(/\D/g, "")),
-        precioVenta: Number(String(formData.precioVenta).replace(/\D/g, "")),
-        saldoPendiente: formData.estado === "Pendiente" ? Number(String(formData.saldoPendiente).replace(/\D/g, "")) : 0,
-        cantidad: Number(formData.cantidad),
-        total: totalCalculado
+        items,
+        total: totalCalculado,
+        saldoPendiente: formData.estado === "Pendiente" ? Number(String(formData.saldoPendiente).replace(/\D/g, "")) : 0
       };
 
       if (modalMode === "create") {
-        await addVenta(dataToSave, user.uid, resolvedDisplayName);
+        const ventaId = await addVenta(dataToSave, user.uid, resolvedDisplayName);
 
-        // Descontar stock en Firestore
-        const selectedProduct = productos.find(p => p.id === formData.productoId);
-        if (selectedProduct) {
-          const newStock = (selectedProduct.stock || 0) - Number(formData.cantidad);
-          await updateProducto(resolvedDisplayName, selectedProduct.id, { stock: newStock });
+        // Descontar stock de cada producto vendido y registrar movimiento de inventario
+        for (const it of items) {
+          const selectedProduct = productos.find(p => p.id === it.productoId);
+          if (selectedProduct) {
+            const newStock = (selectedProduct.stock || 0) - it.cantidad;
+            await updateProducto(resolvedDisplayName, selectedProduct.id, {
+              stock: newStock,
+              stockProveedor: ajustarStockProveedor(selectedProduct, it.cantidad, -1)
+            });
+          }
+          await addMovimiento(
+            {
+              tipo: "Venta",
+              productoId: it.productoId,
+              producto: it.producto,
+              cantidad: -(Number(it.cantidad) || 0),
+              referencia: ventaId
+            },
+            user.uid,
+            resolvedDisplayName
+          );
         }
 
         triggerToast("success", "¡Venta registrada correctamente!");
       } else {
-        // En modo edición
+        // En modo edición: devolver stock original y descontar el nuevo
         const originalVenta = ventas.find(v => v.id === currentVentaId);
         await updateVenta(resolvedDisplayName, currentVentaId, dataToSave);
 
-        // Actualizar stock de los productos involucrados
-        if (originalVenta) {
-          const originalProdId = originalVenta.productoId || productos.find(p => p.nombre === originalVenta.producto)?.id;
-          const newProdId = formData.productoId;
-
-          if (originalProdId === newProdId) {
-            // Mismo producto, ajustar la diferencia
-            const selectedProduct = productos.find(p => p.id === newProdId);
-            if (selectedProduct) {
-              const diff = Number(formData.cantidad) - (originalVenta.cantidad || 0);
-              const newStock = (selectedProduct.stock || 0) - diff;
-              await updateProducto(resolvedDisplayName, selectedProduct.id, { stock: newStock });
-            }
-          } else {
-            // Productos diferentes
-            // Devolver al stock del producto original
-            if (originalProdId) {
-              const originalProduct = productos.find(p => p.id === originalProdId);
-              if (originalProduct) {
-                const refundedStock = (originalProduct.stock || 0) + (originalVenta.cantidad || 0);
-                await updateProducto(resolvedDisplayName, originalProduct.id, { stock: refundedStock });
-              }
-            }
-            // Descontar del stock del nuevo producto
-            const newProduct = productos.find(p => p.id === newProdId);
-            if (newProduct) {
-              const deductedStock = (newProduct.stock || 0) - Number(formData.cantidad);
-              await updateProducto(resolvedDisplayName, newProduct.id, { stock: deductedStock });
-            }
+        const originalItems = getVentaItems(originalVenta);
+        for (const oi of originalItems) {
+          const prod = productos.find(p => p.id === oi.productoId || p.nombre === oi.producto);
+          if (prod) {
+            await updateProducto(resolvedDisplayName, prod.id, {
+              stock: (prod.stock || 0) + (Number(oi.cantidad) || 0),
+              stockProveedor: ajustarStockProveedor(prod, Number(oi.cantidad) || 0, 1)
+            });
           }
+          await addMovimiento(
+            {
+              tipo: "Venta",
+              productoId: oi.productoId,
+              producto: oi.producto,
+              cantidad: Number(oi.cantidad) || 0,
+              referencia: currentVentaId
+            },
+            user.uid,
+            resolvedDisplayName
+          );
+        }
+        for (const it of items) {
+          const prod = productos.find(p => p.id === it.productoId);
+          if (prod) {
+            await updateProducto(resolvedDisplayName, prod.id, {
+              stock: (prod.stock || 0) - it.cantidad,
+              stockProveedor: ajustarStockProveedor(prod, it.cantidad, -1)
+            });
+          }
+          await addMovimiento(
+            {
+              tipo: "Venta",
+              productoId: it.productoId,
+              producto: it.producto,
+              cantidad: -(Number(it.cantidad) || 0),
+              referencia: currentVentaId
+            },
+            user.uid,
+            resolvedDisplayName
+          );
         }
 
         triggerToast("success", "¡Registro de venta actualizado correctamente!");
@@ -562,14 +689,31 @@ function Ventas({ currentUserDisplayName }) {
     try {
       await deleteVenta(resolvedDisplayName, ventaToDelete.id);
 
-      // Devolver stock al producto
-      const prodId = ventaToDelete.productoId || productos.find(p => p.nombre === ventaToDelete.producto)?.id;
-      if (prodId) {
-        const product = productos.find(p => p.id === prodId);
-        if (product) {
-          const restoredStock = (product.stock || 0) + (ventaToDelete.cantidad || 0);
-          await updateProducto(resolvedDisplayName, product.id, { stock: restoredStock });
+      // Devolver stock de todos los productos de la venta y registrar el movimiento de reversión
+      const ventaItems = getVentaItems(ventaToDelete);
+      for (const it of ventaItems) {
+        const prodId = it.productoId || productos.find(p => p.nombre === it.producto)?.id;
+        if (prodId) {
+          const product = productos.find(p => p.id === prodId);
+          if (product) {
+            const restoredStock = (product.stock || 0) + (Number(it.cantidad) || 0);
+            await updateProducto(resolvedDisplayName, product.id, {
+              stock: restoredStock,
+              stockProveedor: ajustarStockProveedor(product, Number(it.cantidad) || 0, 1)
+            });
+          }
         }
+        await addMovimiento(
+          {
+            tipo: "Venta",
+            productoId: it.productoId || prodId,
+            producto: it.producto,
+            cantidad: Number(it.cantidad) || 0,
+            referencia: ventaToDelete.id
+          },
+          user.uid,
+          resolvedDisplayName
+        );
       }
 
       triggerToast("success", "¡Registro de venta eliminado correctamente!");
@@ -592,26 +736,17 @@ function Ventas({ currentUserDisplayName }) {
   const totalGanancias = filteredVentas.reduce((acc, curr) => {
     const total = (curr.total && !isNaN(Number(curr.total))) ? Number(curr.total) : 0;
     const pending = (curr.saldoPendiente && !isNaN(Number(curr.saldoPendiente))) ? Number(curr.saldoPendiente) : 0;
-    const qty = (curr.cantidad && !isNaN(Number(curr.cantidad))) ? Number(curr.cantidad) : 0;
-    const buyPrice = (curr.precioCompra && !isNaN(Number(curr.precioCompra))) ? Number(curr.precioCompra) : 0;
-    const cost = qty * buyPrice;
     const received = total - pending;
+    const items = getVentaItems(curr);
+    const cost = items.reduce((a, it) => a + ((Number(it.cantidad) || 0) * (Number(it.precioCompra) || 0)), 0);
     const profit = Math.max(0, received - cost);
     return acc + (isNaN(profit) ? 0 : profit);
   }, 0);
 
-  const getNumericValue = (val) => {
-    if (val === undefined || val === null) return 0;
-    if (typeof val === "number") return isNaN(val) ? 0 : val;
-    const cleanStr = String(val).replace(/\D/g, "");
-    if (!cleanStr) return 0;
-    const num = Number(cleanStr);
-    return isNaN(num) ? 0 : num;
-  };
-
-  const qty = (formData.cantidad && !isNaN(Number(formData.cantidad))) ? Number(formData.cantidad) : 0;
-  const sellPrice = getNumericValue(formData.precioVenta);
-  const totalCalculado = qty * sellPrice;
+  const totalCalculado = cartItems.reduce(
+    (acc, it) => acc + ((Number(it.cantidad) || 0) * (Number(it.precioVenta) || 0)),
+    0
+  );
 
   return (
     <div className="ventas-container">
@@ -769,11 +904,9 @@ function Ventas({ currentUserDisplayName }) {
                   <thead>
                     <tr>
                       <th>Cliente</th>
-                      <th>Producto</th>
+                      <th>Productos</th>
                       <th>Cant.</th>
-                      <th>Precio Compra</th>
-                      <th>Precio Venta</th>
-                      <th>Total del Producto</th>
+                      <th>Total (Costo / Venta)</th>
                       <th>Ganancia</th>
                       <th>Pago</th>
                       <th>Estado</th>
@@ -784,40 +917,39 @@ function Ventas({ currentUserDisplayName }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredVentas.map((venta) => (
+                    {filteredVentas.map((venta) => {
+                      const ventaItems = getVentaItems(venta);
+                      const ventaQty = ventaItems.reduce((a, it) => a + (Number(it.cantidad) || 0), 0);
+                      const ventaCost = ventaItems.reduce((a, it) => a + ((Number(it.cantidad) || 0) * (Number(it.precioCompra) || 0)), 0);
+                      const ventaReceived = (Number(venta.total) || 0) - (Number(venta.saldoPendiente) || 0);
+                      const ventaProfit = Math.max(0, ventaReceived - ventaCost);
+
+                      return (
                       <tr key={venta.id} className="ven-row">
                         <td className="ven-text-bold">{venta.clienteNombre || "—"}</td>
-                        <td>{venta.producto}</td>
-                        <td>{venta.cantidad}</td>
-                        <td>{formatCurrency(venta.precioCompra || 0)}</td>
-                        <td>{formatCurrency(venta.precioVenta || 0)}</td>
                         <td>
-                          {(() => {
-                            const total = (venta.total && !isNaN(Number(venta.total))) ? Number(venta.total) : 0;
-                            const pending = (venta.saldoPendiente && !isNaN(Number(venta.saldoPendiente))) ? Number(venta.saldoPendiente) : 0;
-                            const qty = (venta.cantidad && !isNaN(Number(venta.cantidad))) ? Number(venta.cantidad) : 0;
-                            const buy = (venta.precioCompra && !isNaN(Number(venta.precioCompra))) ? Number(venta.precioCompra) : 0;
-                            const totalCost = qty * buy;
-                            const totalVentaReceived = total - pending;
-                            return (
-                              <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                <span style={{ fontSize: "0.75rem", color: "#64748b" }}>Costo: {formatCurrency(totalCost)}</span>
-                                <span style={{ fontSize: "0.85rem", fontWeight: "700", color: "#2E5C8A" }}>Venta: {formatCurrency(totalVentaReceived)}</span>
-                              </div>
-                            );
-                          })()}
+                          {ventaItems.length > 1 ? (
+                            <div className="ven-product-list">
+                              {ventaItems.map((it, i) => (
+                                <div className="ven-product-item" key={i}>
+                                  <span className="ven-product-item-name">{it.producto || "—"}</span>
+                                  <span className="ven-product-item-qty">x{it.cantidad}</span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <span>{ventaItems[0]?.producto || venta.producto || "—"}</span>
+                          )}
+                        </td>
+                        <td>{ventaQty}</td>
+                        <td>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                            <span style={{ fontSize: "0.75rem", color: "#64748b" }}>Costo: {formatCurrency(ventaCost)}</span>
+                            <span style={{ fontSize: "0.85rem", fontWeight: "700", color: "#2E5C8A" }}>Venta: {formatCurrency(ventaReceived)}</span>
+                          </div>
                         </td>
                         <td style={{ fontWeight: "700", color: "#27ae60" }}>
-                          {(() => {
-                            const total = (venta.total && !isNaN(Number(venta.total))) ? Number(venta.total) : 0;
-                            const pending = (venta.saldoPendiente && !isNaN(Number(venta.saldoPendiente))) ? Number(venta.saldoPendiente) : 0;
-                            const qty = (venta.cantidad && !isNaN(Number(venta.cantidad))) ? Number(venta.cantidad) : 0;
-                            const buy = (venta.precioCompra && !isNaN(Number(venta.precioCompra))) ? Number(venta.precioCompra) : 0;
-                            const totalCost = qty * buy;
-                            const totalVentaReceived = total - pending;
-                            const profit = Math.max(0, totalVentaReceived - totalCost);
-                            return formatCurrency(isNaN(profit) ? 0 : profit);
-                          })()}
+                          {formatCurrency(isNaN(ventaProfit) ? 0 : ventaProfit)}
                         </td>
                         <td>
                           <span className="ven-doc-badge">{venta.metodoPago}</span>
@@ -879,7 +1011,8 @@ function Ventas({ currentUserDisplayName }) {
                           </div>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               ) : (
@@ -979,93 +1112,116 @@ function Ventas({ currentUserDisplayName }) {
                   )}
                 </div>
 
-                {/* Producto */}
+                {/* Productos (Carrito Multi-Producto) */}
                 <div className="ven-form-group span-2">
-                  <label htmlFor="productoId">Producto Vendido (Código o Nombre)<span className="required-mark">*</span></label>
-                  <select 
-                    id="productoId" 
-                    name="productoId"
-                    value={formData.productoId}
-                    onChange={handleInputChange}
-                    className={`ven-select ${formErrors.productoId ? "error" : ""}`}
-                  >
-                    <option value="" disabled>Seleccione un producto...</option>
-                    {productos.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        [{p.codigo}] {p.nombre} — (Stock: {p.stock !== undefined ? p.stock : 0})
-                      </option>
-                    ))}
-                  </select>
-                  {formErrors.productoId && (
+                  <label>Productos a Vender (Puede agregar varios)<span className="required-mark">*</span></label>
+                  {formErrors.items && (
                     <span className="ven-field-error">
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <circle cx="12" cy="12" r="10"></circle>
                         <line x1="12" y1="8" x2="12" y2="12"></line>
                         <line x1="12" y1="16" x2="12.01" y2="16"></line>
                       </svg>
-                      {formErrors.productoId}
+                      {formErrors.items}
                     </span>
                   )}
-                  {formData.productoId && (
-                    <span className="ven-stock-info" style={{ fontSize: "0.8rem", color: "#8e7a9c", marginTop: "4px" }}>
-                      Stock disponible: <strong style={{ color: "#7d3c98" }}>{productos.find(p => p.id === formData.productoId)?.stock || 0}</strong> unidades.
-                    </span>
-                  )}
-                </div>
 
-                {/* Cantidad */}
-                <div className="ven-form-group">
-                  <label htmlFor="cantidad">Cantidad<span className="required-mark">*</span></label>
-                  <input 
-                    type="number" 
-                    id="cantidad"
-                    name="cantidad"
-                    min="1"
-                    step="1"
-                    placeholder="1"
-                    value={formData.cantidad}
-                    onChange={handleInputChange}
-                    className={`ven-input ${formErrors.cantidad ? "error" : ""}`}
-                  />
-                  {formErrors.cantidad && (
-                    <span className="ven-field-error">{formErrors.cantidad}</span>
-                  )}
-                </div>
+                  <div className="ven-cart-box">
+                    {cartItems.map((item, index) => {
+                      const selectedProduct = productos.find(p => p.id === item.productoId);
+                      const stock = selectedProduct?.stock || 0;
+                      const subtotal = (Number(item.cantidad) || 0) * (Number(item.precioVenta) || 0);
 
-                {/* Precio Compra */}
-                <div className="ven-form-group">
-                  <label htmlFor="precioCompra">Precio Unitario (Compra)<span className="required-mark">*</span></label>
-                  <input 
-                    type="text" 
-                    inputMode="numeric"
-                    id="precioCompra"
-                    name="precioCompra"
-                    placeholder="Ej. 30.000"
-                    value={formData.precioCompra}
-                    onChange={handleInputChange}
-                    className={`ven-input ${formErrors.precioCompra ? "error" : ""}`}
-                  />
-                  {formErrors.precioCompra && (
-                    <span className="ven-field-error">{formErrors.precioCompra}</span>
-                  )}
-                </div>
+                      return (
+                        <div className="ven-cart-row" key={index}>
+                          <div className="ven-cart-col product">
+                            <select
+                              value={item.productoId}
+                              onChange={(e) => handleCartProductChange(index, e.target.value)}
+                              className={`ven-select ${formErrors[`item-${index}`] ? "error" : ""}`}
+                            >
+                              <option value="" disabled>Seleccione un producto...</option>
+                              {productos.map((p) => (
+                                <option key={p.id} value={p.id}>
+                                  [{p.codigo}] {p.nombre} — (Stock: {p.stock !== undefined ? p.stock : 0})
+                                </option>
+                              ))}
+                            </select>
+                            {formErrors[`item-${index}`] && (
+                              <span className="ven-field-error">{formErrors[`item-${index}`]}</span>
+                            )}
+                            {item.productoId && !formErrors[`item-${index}`] && (
+                              <span className="ven-stock-info">Stock disponible: <strong>{stock}</strong> unidades.</span>
+                            )}
+                          </div>
 
-                {/* Precio Venta */}
-                <div className="ven-form-group">
-                  <label htmlFor="precioVenta">Precio a Vender<span className="required-mark">*</span></label>
-                  <input 
-                    type="text" 
-                    inputMode="numeric"
-                    id="precioVenta"
-                    name="precioVenta"
-                    placeholder="Ej. 50.000"
-                    value={formData.precioVenta}
-                    onChange={handleInputChange}
-                    className={`ven-input ${formErrors.precioVenta ? "error" : ""}`}
-                  />
-                  {formErrors.precioVenta && (
-                    <span className="ven-field-error">{formErrors.precioVenta}</span>
-                  )}
+                          <div className="ven-cart-col qty">
+                            <label>Cant.</label>
+                            <input
+                              type="number"
+                              min="1"
+                              step="1"
+                              placeholder="1"
+                              value={item.cantidad}
+                              onChange={(e) => handleCartFieldChange(index, "cantidad", e.target.value)}
+                              className={`ven-input ${formErrors[`item-${index}`] ? "error" : ""}`}
+                            />
+                          </div>
+
+                          <div className="ven-cart-col price">
+                            <label>P. Compra</label>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              placeholder="0"
+                              value={formatCurrencyInput(item.precioCompra)}
+                              onChange={(e) => handleCartFieldChange(index, "precioCompra", e.target.value)}
+                              className="ven-input"
+                            />
+                          </div>
+
+                          <div className="ven-cart-col price">
+                            <label>P. Venta</label>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              placeholder="Ej. 50.000"
+                              value={formatCurrencyInput(item.precioVenta)}
+                              onChange={(e) => handleCartFieldChange(index, "precioVenta", e.target.value)}
+                              className={`ven-input ${formErrors[`item-${index}`] ? "error" : ""}`}
+                            />
+                          </div>
+
+                          <div className="ven-cart-col subtotal">
+                            <label>Subtotal</label>
+                            <span className="ven-cart-subtotal">{formatCurrency(subtotal)}</span>
+                          </div>
+
+                          <div className="ven-cart-col remove">
+                            <button
+                              type="button"
+                              className="ven-cart-remove-btn"
+                              onClick={() => removeCartItem(index)}
+                              title="Quitar producto"
+                            >
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <line x1="18" y1="6" x2="6" y2="18"></line>
+                                <line x1="6" y1="6" x2="18" y2="18"></line>
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    <button type="button" className="ven-cart-add-btn" onClick={addCartItem}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                      </svg>
+                      Agregar otro producto
+                    </button>
+                  </div>
                 </div>
 
                 {/* Método Pago */}
@@ -1167,7 +1323,19 @@ function Ventas({ currentUserDisplayName }) {
               </div>
               <div className="ven-delete-text">
                 <h4>¿Eliminar registro de venta permanentemente?</h4>
-                <p>Esta acción eliminará la venta de <strong>{ventaToDelete.producto}</strong> realizada a <strong>{ventaToDelete.clienteNombre}</strong> por <strong>{formatCurrency(ventaToDelete.total)}</strong> de la base de datos de Firestore. Esta operación no se puede deshacer.</p>
+                <p>
+                  Esta acción eliminará la venta de{" "}
+                  <strong>
+                    {(() => {
+                      const items = getVentaItems(ventaToDelete);
+                      return items.length > 1
+                        ? `${items.length} productos (${items.map(it => it.producto).join(", ")})`
+                        : items[0]?.producto || ventaToDelete.producto || "producto";
+                    })()}
+                  </strong>{" "}
+                  realizada a <strong>{ventaToDelete.clienteNombre}</strong> por{" "}
+                  <strong>{formatCurrency(ventaToDelete.total)}</strong> de la base de datos de Firestore. Esta operación no se puede deshacer.
+                </p>
               </div>
             </div>
             <div className="ven-modal-footer">

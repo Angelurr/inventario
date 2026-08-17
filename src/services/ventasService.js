@@ -1,4 +1,4 @@
-import { collection, addDoc, getDocs, updateDoc, deleteDoc, doc, query, where, serverTimestamp, onSnapshot } from "firebase/firestore";
+import { collection, addDoc, updateDoc, deleteDoc, doc, query, where, serverTimestamp, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase/firebaseConfig";
 
 /**
@@ -56,7 +56,6 @@ export const subscribeVentas = (userDisplayName, userId, callback, onError) => {
       return timeB - timeA;
     });
 
-    callback(clientes => {});
     callback(ventas);
   }, (error) => {
     console.error("Error en suscripción de ventas:", error);
@@ -66,15 +65,41 @@ export const subscribeVentas = (userDisplayName, userId, callback, onError) => {
 
 /**
  * Agrega una nueva venta a Firestore.
+ * Soporta ventas con múltiples productos mediante el campo `items`
+ * (arreglo de { productoId, producto, cantidad, precioCompra, precioVenta }).
  */
 export const addVenta = async (ventaData, userId, userDisplayName) => {
   try {
+    const items = Array.isArray(ventaData.items) && ventaData.items.length > 0
+      ? ventaData.items.map((it) => ({
+          productoId: it.productoId || "",
+          producto: it.producto || "",
+          cantidad: Number(it.cantidad) || 0,
+          precioCompra: Number(it.precioCompra || 0),
+          precioVenta: Number(it.precioVenta || 0),
+          subtotal: (Number(it.cantidad) || 0) * (Number(it.precioVenta) || 0),
+        }))
+      : [{
+          productoId: ventaData.productoId || "",
+          producto: ventaData.producto || "",
+          cantidad: Number(ventaData.cantidad) || 0,
+          precioCompra: Number(ventaData.precioCompra || 0),
+          precioVenta: Number(ventaData.precioVenta || 0),
+          subtotal: (Number(ventaData.cantidad) || 0) * (Number(ventaData.precioVenta) || 0),
+        }];
+
+    const totalQty = items.reduce((acc, it) => acc + it.cantidad, 0);
+    const total = items.reduce((acc, it) => acc + it.subtotal, 0);
+    const totalCost = items.reduce((acc, it) => acc + (it.cantidad * it.precioCompra), 0);
+
     const nuevaVenta = {
       ...ventaData,
-      cantidad: Number(ventaData.cantidad),
-      precioCompra: Number(ventaData.precioCompra || 0),
-      precioVenta: Number(ventaData.precioVenta || 0),
-      total: Number(ventaData.cantidad) * Number(ventaData.precioVenta || 0),
+      items,
+      producto: ventaData.producto || items[0]?.producto || "",
+      cantidad: totalQty,
+      precioCompra: totalQty > 0 ? totalCost / totalQty : 0,
+      precioVenta: totalQty > 0 ? total / totalQty : 0,
+      total,
       creadoPor: userId,
       registradoPor: userDisplayName || "Usuario",
       fechaCreacion: serverTimestamp(),
@@ -95,22 +120,41 @@ export const updateVenta = async (userDisplayName, id, updatedData) => {
   try {
     const docRef = doc(db, getCollectionName(userDisplayName), id);
     const dataToSave = { ...updatedData };
-    
-    // Si cambiaron cantidad, precioVenta o precioCompra, los convertimos a números y recalculamos el total
-    if (dataToSave.cantidad !== undefined) {
-      dataToSave.cantidad = Number(dataToSave.cantidad);
-    }
-    if (dataToSave.precioCompra !== undefined) {
-      dataToSave.precioCompra = Number(dataToSave.precioCompra);
-    }
-    if (dataToSave.precioVenta !== undefined) {
-      dataToSave.precioVenta = Number(dataToSave.precioVenta);
-    }
 
-    if (dataToSave.cantidad !== undefined || dataToSave.precioVenta !== undefined) {
-      const q = dataToSave.cantidad !== undefined ? dataToSave.cantidad : 0;
-      const p = dataToSave.precioVenta !== undefined ? dataToSave.precioVenta : 0;
-      dataToSave.total = q * p;
+    if (Array.isArray(dataToSave.items) && dataToSave.items.length > 0) {
+      dataToSave.items = dataToSave.items.map((it) => ({
+        productoId: it.productoId || "",
+        producto: it.producto || "",
+        cantidad: Number(it.cantidad) || 0,
+        precioCompra: Number(it.precioCompra || 0),
+        precioVenta: Number(it.precioVenta || 0),
+        subtotal: (Number(it.cantidad) || 0) * (Number(it.precioVenta) || 0),
+      }));
+
+      const totalQty = dataToSave.items.reduce((acc, it) => acc + it.cantidad, 0);
+      const totalCost = dataToSave.items.reduce((acc, it) => acc + (it.cantidad * it.precioCompra), 0);
+      dataToSave.cantidad = totalQty;
+      dataToSave.total = dataToSave.items.reduce((acc, it) => acc + it.subtotal, 0);
+      dataToSave.precioCompra = totalQty > 0 ? totalCost / totalQty : 0;
+      dataToSave.precioVenta = totalQty > 0 ? dataToSave.total / totalQty : 0;
+      dataToSave.producto = dataToSave.items[0]?.producto || "";
+    } else if (dataToSave.cantidad !== undefined || dataToSave.precioVenta !== undefined) {
+      // Compatibilidad con ventas antiguas de un solo producto
+      if (dataToSave.cantidad !== undefined) {
+        dataToSave.cantidad = Number(dataToSave.cantidad);
+      }
+      if (dataToSave.precioCompra !== undefined) {
+        dataToSave.precioCompra = Number(dataToSave.precioCompra);
+      }
+      if (dataToSave.precioVenta !== undefined) {
+        dataToSave.precioVenta = Number(dataToSave.precioVenta);
+      }
+
+      if (dataToSave.cantidad !== undefined || dataToSave.precioVenta !== undefined) {
+        const q = dataToSave.cantidad !== undefined ? dataToSave.cantidad : 0;
+        const p = dataToSave.precioVenta !== undefined ? dataToSave.precioVenta : 0;
+        dataToSave.total = q * p;
+      }
     }
 
     await updateDoc(docRef, dataToSave);

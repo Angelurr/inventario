@@ -1,11 +1,11 @@
-import { collection, addDoc, getDocs, updateDoc, deleteDoc, doc, query, where, orderBy, serverTimestamp, onSnapshot } from "firebase/firestore";
+import { collection, addDoc, getDocs, updateDoc, deleteDoc, doc, query, where, serverTimestamp, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase/firebaseConfig";
 
 /**
  * @typedef {Object} Cliente
  * @property {string} [id] - ID único autogenerado por Firestore.
  * @property {string} tipoDocumento - Tipo de identificación (ej. CC, CE, NIT, PP).
- * @property {string} documento - Número de documento de identidad (único).
+ * @property {string} documento - Número de documento de identidad.
  * @property {string} nombres - Nombres del cliente.
  * @property {string} apellidos - Apellidos del cliente.
  * @property {string} email - Correo electrónico de contacto.
@@ -27,36 +27,6 @@ const getCollectionName = (userDisplayName) => {
     .replace(/_+/g, "_")
     .trim();
   return `clientes_${sanitized}`;
-};
-
-/**
- * Verifica si ya existe un cliente con el mismo tipo y número de documento.
- */
-export const checkDocumentoExiste = async (userDisplayName, tipoDocumento, documento, excludeId = null) => {
-  try {
-    const clientesRef = collection(db, getCollectionName(userDisplayName));
-    const q = query(
-      clientesRef,
-      where("tipoDocumento", "==", tipoDocumento),
-      where("documento", "==", documento)
-    );
-    const querySnapshot = await getDocs(q);
-    
-    if (querySnapshot.empty) {
-      return false;
-    }
-    
-    // Si hay registros, verificar si el ID no es el que estamos editando
-    if (excludeId) {
-      const match = querySnapshot.docs.find(doc => doc.id !== excludeId);
-      return !!match;
-    }
-    
-    return true;
-  } catch (error) {
-    console.error("Error al verificar documento existente:", error);
-    throw error;
-  }
 };
 
 /**
@@ -97,12 +67,6 @@ export const subscribeClientes = (userDisplayName, userId, callback, onError) =>
  */
 export const addCliente = async (clienteData, userId, userDisplayName) => {
   try {
-    // Validar duplicado antes de insertar
-    const existe = await checkDocumentoExiste(userDisplayName, clienteData.tipoDocumento, clienteData.documento);
-    if (existe) {
-      throw new Error(`Ya existe un cliente registrado con el documento ${clienteData.tipoDocumento} ${clienteData.documento}`);
-    }
-
     const nuevoCliente = {
       ...clienteData,
       creadoPor: userId,
@@ -156,19 +120,6 @@ export const getClientes = async (userDisplayName, userId) => {
  */
 export const updateCliente = async (userDisplayName, id, updatedData) => {
   try {
-    // Si se está cambiando el documento, verificar duplicados excluyendo el cliente actual
-    if (updatedData.tipoDocumento || updatedData.documento) {
-      const existe = await checkDocumentoExiste(
-        userDisplayName,
-        updatedData.tipoDocumento, 
-        updatedData.documento, 
-        id
-      );
-      if (existe) {
-        throw new Error(`Ya existe otro cliente registrado con el documento ${updatedData.tipoDocumento} ${updatedData.documento}`);
-      }
-    }
-
     const docRef = doc(db, getCollectionName(userDisplayName), id);
     await updateDoc(docRef, updatedData);
   } catch (error) {

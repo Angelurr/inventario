@@ -8,6 +8,9 @@ import Clientes from "../../components/Clientes/Clientes";
 import Productos from "../../components/Productos/Productos";
 import Ventas from "../../components/Ventas/Ventas";
 import Reportes from "../../components/Reportes/Reportes";
+import Proveedores from "../../components/Proveedores/Proveedores";
+import Compras from "../../components/Compras/Compras";
+import Inventario from "../../components/Inventario/Inventario";
 import "./Home.css";
 
 function Home() {
@@ -19,7 +22,7 @@ function Home() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [activeView, setActiveView] = useState("dashboard");
   const menuRef = useRef(null);
-  const [stats, setStats] = useState({ sessionsCount: 0, clientsCount: 0, loading: true });
+  const [, setStats] = useState({ sessionsCount: 0, clientsCount: 0, loading: true });
 
   // Consultar estadísticas dinámicamente para el Dashboard
   useEffect(() => {
@@ -187,14 +190,27 @@ function Home() {
           <div className="portal-container">
             <div className="portal-profile-header">
               <div className="portal-avatar-container">
-                <div className={`portal-avatar ${isUploading ? "uploading" : ""}`}>
-                  {isUploading ? (
-                    <div className="avatar-spinner"></div>
-                  ) : photoURL ? (
-                    <img src={photoURL} alt="Perfil" />
-                  ) : (
-                    <span>{userInitial}</span>
-                  )}
+                <div className={`portal-avatar-ring ${isUploading ? "uploading" : ""}`}>
+                  <div className="portal-avatar">
+                    {isUploading ? (
+                      <div className="avatar-spinner"></div>
+                    ) : photoURL ? (
+                      <img src={photoURL} alt="Perfil" />
+                    ) : (
+                      <span>{userInitial}</span>
+                    )}
+                  </div>
+                  <div
+                    className="portal-avatar-overlay"
+                    onClick={() => document.getElementById('fileInput').click()}
+                    title="Cambiar foto de perfil"
+                  >
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                      <circle cx="12" cy="13" r="4"></circle>
+                    </svg>
+                    <span>Cambiar foto</span>
+                  </div>
                 </div>
                 <button 
                   className="portal-change-photo-badge" 
@@ -261,7 +277,7 @@ function Home() {
               </div>
               {!sidebarCollapsed && (
                 <>
-                  <span className="brand-name">SessionApp</span>
+                  <span className="brand-name">AuroInventario</span>
                   <button 
                     className="sidebar-toggle" 
                     onClick={() => setSidebarCollapsed(!sidebarCollapsed)} 
@@ -272,6 +288,17 @@ function Home() {
                     </svg>
                   </button>
                 </>
+              )}
+              {sidebarCollapsed && (
+                <button
+                  className="sidebar-toggle sidebar-expand-btn"
+                  onClick={() => setSidebarCollapsed(false)}
+                  title="Expandir menú"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="9 18 15 12 9 6"></polyline>
+                  </svg>
+                </button>
               )}
             </div>
 
@@ -329,6 +356,43 @@ function Home() {
                   <line x1="7" y1="7" x2="7.01" y2="7"></line>
                 </svg>
                 {!sidebarCollapsed && <span>Productos</span>}
+              </a>
+              <a 
+                className={`nav-item ${activeView === "proveedores" ? "active" : ""}`} 
+                href="#" 
+                onClick={(e) => { e.preventDefault(); setActiveView("proveedores"); }}
+                title="Proveedores"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"></path>
+                </svg>
+                {!sidebarCollapsed && <span>Proveedores</span>}
+              </a>
+              <a 
+                className={`nav-item ${activeView === "compras" ? "active" : ""}`} 
+                href="#" 
+                onClick={(e) => { e.preventDefault(); setActiveView("compras"); }}
+                title="Compras"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="9" cy="21" r="1"></circle>
+                  <circle cx="20" cy="21" r="1"></circle>
+                  <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
+                </svg>
+                {!sidebarCollapsed && <span>Compras</span>}
+              </a>
+              <a 
+                className={`nav-item ${activeView === "inventario" ? "active" : ""}`} 
+                href="#" 
+                onClick={(e) => { e.preventDefault(); setActiveView("inventario"); }}
+                title="Inventario"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                  <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                  <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                </svg>
+                {!sidebarCollapsed && <span>Inventario</span>}
               </a>
               <a 
                 className={`nav-item ${activeView === "ventas" ? "active" : ""}`} 
@@ -425,6 +489,9 @@ function Home() {
                     {activeView === "historial" && "Aquí puedes ver y gestionar tu historial de sesiones"}
                     {activeView === "clientes" && "Aquí puedes ver y estructurar la información de tus clientes"}
                     {activeView === "productos" && "Aquí puedes ver y estructurar la información de tus productos"}
+                    {activeView === "proveedores" && "Aquí puedes registrar y gestionar a tus proveedores"}
+                    {activeView === "compras" && "Aquí puedes registrar las compras realizadas a tus proveedores"}
+                    {activeView === "inventario" && "Stock actual, valor del inventario y movimientos de tus productos"}
                     {activeView === "ventas" && "Aquí puedes ver y gestionar tus transacciones de ventas"}
                     {activeView === "reportes" && "Estadísticas comerciales, volumen de ventas y ganancias netas"}
                     {activeView === "perfil" && "Gestión de información personal e imagen"}
@@ -522,6 +589,9 @@ function Home() {
               {activeView === "historial" && <SessionHistory />}
               {activeView === "clientes" && <Clientes currentUserDisplayName={displayName} />}
               {activeView === "productos" && <Productos currentUserDisplayName={displayName} />}
+              {activeView === "proveedores" && <Proveedores currentUserDisplayName={displayName} />}
+              {activeView === "compras" && <Compras currentUserDisplayName={displayName} />}
+              {activeView === "inventario" && <Inventario currentUserDisplayName={displayName} />}
               {activeView === "ventas" && <Ventas currentUserDisplayName={displayName} />}
               {activeView === "reportes" && <Reportes currentUserDisplayName={displayName} />}
               
@@ -568,7 +638,7 @@ function Home() {
                       </div>
                       
                       <div className="profile-name-section">
-                        <h3>{displayName || "Usuario de SessionApp"}</h3>
+                        <h3>{displayName || "Usuario de AuroInventario"}</h3>
                         <span className="profile-role-badge">Administrador</span>
                       </div>
                     </div>

@@ -4,9 +4,10 @@ import {
   subscribeClientes, 
   addCliente, 
   updateCliente, 
-  deleteCliente,
-  checkDocumentoExiste 
+  deleteCliente
 } from "../../services/clientesService";
+import { restoreCaret } from "../../utils/caretUtils";
+import { getLocalDateString } from "../../utils/dateUtils";
 import "./Clientes.css";
 
 function Clientes({ currentUserDisplayName }) {
@@ -165,7 +166,7 @@ function Clientes({ currentUserDisplayName }) {
       doc.setFont("helvetica", "bold");
       doc.setFontSize(18);
       doc.setTextColor(46, 92, 138); // #2E5C8A
-      doc.text("SessionApp — Base de Datos de Clientes", 14, 20);
+      doc.text("AuroInventario — Base de Datos de Clientes", 14, 20);
       
       doc.setFont("helvetica", "normal");
       doc.setFontSize(10);
@@ -220,7 +221,7 @@ function Clientes({ currentUserDisplayName }) {
         alternateRowStyles: { fillColor: [248, 250, 253] },
       });
 
-      doc.save(`clientes_${new Date().toISOString().slice(0, 10)}.pdf`);
+      doc.save(`clientes_${getLocalDateString()}.pdf`);
     } catch (error) {
       console.error("Error al exportar PDF:", error);
       triggerToast("error", error.message || "Hubo un error al generar el PDF.");
@@ -264,7 +265,7 @@ function Clientes({ currentUserDisplayName }) {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.setAttribute("download", `clientes_${new Date().toISOString().slice(0, 10)}.csv`);
+      link.setAttribute("download", `clientes_${getLocalDateString()}.csv`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -277,11 +278,18 @@ function Clientes({ currentUserDisplayName }) {
 
   // CRUD Event Handlers
   const handleInputChange = (e) => {
-    const { name, value } = e.target;
+    const { name, value, type } = e.target;
+    const caret = e.target.selectionStart;
+    const esTexto = type === "text" || type === "search" || type === "tel" || type === "textarea";
+    const nuevoValor = esTexto && name !== "email" ? value.toUpperCase() : value;
     setFormData((prev) => ({
       ...prev,
-      [name]: value
+      [name]: nuevoValor
     }));
+    // Mantener la posición del cursor al transformar a mayúsculas
+    if (nuevoValor !== value) {
+      restoreCaret(e.target, caret);
+    }
     // Limpiar error al editar
     if (formErrors[name]) {
       setFormErrors((prev) => ({ ...prev, [name]: "" }));
@@ -337,35 +345,9 @@ function Clientes({ currentUserDisplayName }) {
     setSubmitting(true);
     try {
       if (modalMode === "create") {
-        // Validación de duplicado local en base de datos antes de enviar (solo si se ingresó documento)
-        if (formData.documento && formData.documento.trim()) {
-          const existe = await checkDocumentoExiste(resolvedDisplayName, formData.tipoDocumento, formData.documento);
-          if (existe) {
-            setFormErrors((prev) => ({
-              ...prev,
-              documento: `Ya existe un cliente con el documento ${formData.tipoDocumento} ${formData.documento}`
-            }));
-            setSubmitting(false);
-            return;
-          }
-        }
-
         await addCliente(formData, user.uid, resolvedDisplayName);
         triggerToast("success", "¡Cliente registrado correctamente!");
       } else {
-        // En modo edición
-        if (formData.documento && formData.documento.trim()) {
-          const existe = await checkDocumentoExiste(resolvedDisplayName, formData.tipoDocumento, formData.documento, currentClienteId);
-          if (existe) {
-            setFormErrors((prev) => ({
-              ...prev,
-              documento: `Ya existe otro cliente con el documento ${formData.tipoDocumento} ${formData.documento}`
-            }));
-            setSubmitting(false);
-            return;
-          }
-        }
-
         await updateCliente(resolvedDisplayName, currentClienteId, formData);
         triggerToast("success", "¡Datos del cliente actualizados correctamente!");
       }

@@ -258,6 +258,30 @@
   min-height: 200px;
 }
 
+/* Custom scrollbar horizontal visible */
+.cli-table-container::-webkit-scrollbar {
+  height: 8px;
+}
+
+.cli-table-container::-webkit-scrollbar-track {
+  background: #f0f6ff;
+  border-radius: 10px;
+}
+
+.cli-table-container::-webkit-scrollbar-thumb {
+  background: rgba(74, 144, 226, 0.35);
+  border-radius: 10px;
+}
+
+.cli-table-container::-webkit-scrollbar-thumb:hover {
+  background: rgba(74, 144, 226, 0.55);
+}
+
+.cli-table-container {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(74, 144, 226, 0.35) #f0f6ff;
+}
+
 .cli-table {
   width: 100%;
   min-width: 1200px;
